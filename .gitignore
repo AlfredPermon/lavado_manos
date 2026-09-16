@@ -1,28 +1,4 @@
-Remove-Item -Recurse -Force .git
-
-@"
-venv/
-.venv/
-env/
-ENV/
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
-.env
-build/
-dist/
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-"@ | Out-File -Encoding utf8 .gitignore
-
-git init
-git status --ignored
-git add .
-git status
-git commit -m "Primer commit limpio sin entornos virtuales"
-git branch -M main
-git remote add origin https://github.com/AlfredPermon/lavado_manos.git
-git push -u origin main
+```
+# HTML files
+*.html
+```
