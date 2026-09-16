@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Evaluación de Lavado de Manos - OMS</title>
+    <style>
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 800px; margin: 0 auto; padding: 20px; background-color: #f4f7f6; }
+        .container { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        h1 { color: #2c3e50; text-align: center; }
+        .step-group { margin-bottom: 20px; border-bottom: 1px solid #eee; padding-bottom: 15px; }
+        .step-item { display: flex; align-items: flex-start; margin-bottom: 10px; }
+        .step-item input { margin-top: 5px; margin-right: 10px; transform: scale(1.2); }
+        .step-item label { cursor: pointer; line-height: 1.4; }
+        .critical-note { color: #e74c3c; font-size: 0.9em; font-weight: bold; }
+        button { display: block; width: 100%; padding: 15px; background-color: #3498db; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer; transition: background 0.3s; }
+        button:hover { background-color: #2980b9; }
+        #result-area { margin-top: 20px; display: none; }
+        pre { background: #2d3436; color: #fab1a0; padding: 15px; border-radius: 5px; overflow-x: auto; }
+        .status-high { color: #e74c3c; font-weight: bold; }
+        .status-ok { color: #27ae60; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h1>Autoevaluación de Lavado de Manos (OMS)</h1>
+    <p>Marque los pasos que ha realizado correctamente en su último lavado (Duración ideal: 40-60 seg).</p>
+
+    <form id="washForm">
+        <div class="step-group">
+            <h3>Pasos de Fricción</h3>
+            <div class="step-item">
+                <input type="checkbox" id="step1" value="1">
+                <label for="step1">1. Frotarse las palmas de las manos entre sí.</label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="step2" value="2">
+                <label for="step2">2. Frotarse la palma de la mano derecha contra el dorso de la izquierda (entrelazando dedos) y viceversa. <span class="critical-note">(CRÍTICO)</span></label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="step3" value="3">
+                <label for="step3">3. Frotarse las palmas entre sí, con los dedos entrelazados.</label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="step4" value="4">
+                <label for="step4">4. Frotarse el dorso de los dedos de una mano con la palma opuesta, agarrándose los dedos.</label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="step5" value="5">
+                <label for="step5">5. Frotarse con rotación el pulgar izquierdo (atrapado por la palma derecha) y viceversa.</label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="step6" value="6">
+                <label for="step6">6. Frotarse la punta de los dedos contra la palma opuesta con rotación (uñas). <span class="critical-note">(CRÍTICO)</span></label>
+            </div>
+        </div>
+
+        <div class="step-group">
+            <h3>Recursos Utilizados</h3>
+            <div class="step-item">
+                <input type="checkbox" id="resWater" checked disabled>
+                <label for="resWater">Agua corriente</label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="resSoap">
+                <label for="resSoap">Jabón</label>
+            </div>
+            <div class="step-item">
+                <input type="checkbox" id="resTowel">
+                <label for="resTowel">Secado con toalla desechable</label>
+            </div>
+        </div>
+
+        <button type="button" onclick="generateEvaluation()">Generar Evaluación JSON</button>
+    </form>
+
+    <div id="result-area">
+        <h3>Resultado de la Evaluación:</h3>
+        <p>Nivel de Riesgo: <span id="risk-display"></span></p>
+        <p>Recomendación: <span id="rec-display"></span></p>
+        <pre id="json-output"></pre>
+    </div>
+</div>
+
+<script>
+    function generateEvaluation() {
+        const completed = [];
+        const omitted = [];
+        
+        // Recopilar pasos
+        for (let i = 1; i <= 6; i++) {
+            if (document.getElementById('step' + i).checked) {
+                completed.push(i);
+            } else {
+                omitted.push(i);
+            }
+        }
+
+        // Calcular eficiencia (cada paso vale ~16.66%)
+        const efficiency = Math.round((completed.length / 6) * 100);
+
+        // Determinar riesgo crítico
+        // Regla: Si falta paso 2 o paso 6 -> Riesgo Alto
+        const missingCritical2 = omitted.includes(2);
+        const missingCritical6 = omitted.includes(6);
+        
+        let riskLevel = "Bajo";
+        let recommendation = "Técnica adecuada. Continuar supervisando tiempos de fricción.";
+
+        if (missingCritical2 || missingCritical6) {
+            riskLevel = "Alto";
+            if (missingCritical2 && missingCritical6) {
+                recommendation = "Riesgo Alto de Contaminación Cruzada: Se omitieron la limpieza del dorso de las manos y la higiene de las uñas/puntas. Áreas críticas de retención bacteriana.";
+            } else if (missingCritical2) {
+                recommendation = "Riesgo Alto de Contaminación Cruzada: Se omitió la fricción del dorso de las manos. Es necesario cubrir toda la superficie cutánea.";
+            } else {
+                recommendation = "Riesgo Alto de Contaminación Cruzada: Se omitió la limpieza de las puntas de los dedos y uñas. Esta zona es vector frecuente de transmisión.";
+            }
+        } else if (efficiency < 50) {
+            riskLevel = "Medio";
+            recommendation = "Se han omitido varios pasos intermedios. Repasar la secuencia completa de la OMS.";
+        }
+
+        // Verificar recursos básicos (opcional para la lógica estricta de pasos, pero bueno para la recomendación)
+        if (!document.getElementById('resSoap').checked || !document.getElementById('resTowel').checked) {
+            if (riskLevel !== "Alto") riskLevel = "Medio";
+            recommendation += " Además, asegure el uso de jabón y secado adecuado.";
+        }
+
+        const resultObj = {
+            evaluacion_id: "eval_" + Date.now(),
+            eficiencia_porcentaje: efficiency,
+            pasos_completados: completed,
+            pasos_omitidos: omitted,
+            nivel_de_riesgo: riskLevel,
+            recomendacion_epidemiologia: recommendation
+        };
+
+        // Mostrar resultados
+        document.getElementById('result-area').style.display = 'block';
+        document.getElementById('risk-display').className = riskLevel === "Alto" ? "status-high" : "status-ok";
+        document.getElementById('risk-display').innerText = riskLevel;
+        document.getElementById('rec-display').innerText = recommendation;
+        document.getElementById('json-output').textContent = JSON.stringify(resultObj, null, 2);
+    }
+</script>
+
+</body>
+</html>
