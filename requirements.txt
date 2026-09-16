@@ -1,0 +1,12 @@
+cvzone
+keras<3.0
+mediapipe==0.10.5
+numpy<2
+opencv-contrib-python
+opencv-python
+pandas
+plotly
+streamlit
+tensorflow==2.15.0
+torch
+ultralytics
