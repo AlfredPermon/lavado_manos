@@ -232,9 +232,18 @@ class HandWashApp:
         self.btn_restart = ttk.Button(controls_frame, text="↻ Reiniciar", width=10, command=self.restart_process)
         self.btn_restart.pack(side=tk.LEFT, padx=2)
         
+        self.btn_modern = ttk.Button(controls_frame, text="✨ Modo Moderno HUD", command=self.launch_modern_ui)
+        self.btn_modern.pack(side=tk.LEFT, padx=2)
+        
         self.auto_start_var = tk.BooleanVar(value=False)
         chk_auto = ttk.Checkbutton(controls_frame, text="Auto-Inicio", variable=self.auto_start_var)
         chk_auto.pack(side=tk.LEFT, padx=5)
+
+    def launch_modern_ui(self):
+        self.on_close()
+        from gui_app_modern import HandWashAppModern
+        app_modern = HandWashAppModern()
+        app_modern.mainloop()
 
         # Content Area
         content_frame = ttk.Frame(main_container)
@@ -1158,6 +1167,11 @@ class HandWashApp:
         return None
 
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = HandWashApp(root)
-    root.mainloop()
+    if "--classic" in sys.argv:
+        root = tk.Tk()
+        app = HandWashApp(root)
+        root.mainloop()
+    else:
+        from gui_app_modern import HandWashAppModern
+        app = HandWashAppModern()
+        app.mainloop()

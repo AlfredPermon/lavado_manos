@@ -10,3 +10,4 @@ streamlit
 tensorflow==2.15.0
 torch
 ultralytics
+customtkinter
