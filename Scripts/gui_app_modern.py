@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 """
 Sistema de Evaluación de Lavado de Manos (OMS) - AI Vision Platform
-Interfaz Gráfica Moderna (CustomTkinter + Dark Mode + HUD + Asistente de Voz)
+Interfaz Gráfica Moderna (CustomTkinter + Dark Mode + HUD + Asistente de Voz Interactivo)
 """
 
 import os
@@ -74,6 +74,15 @@ class HandWashAppModern(ctk.CTk):
             5: ("Paso 8", "Puntas de dedos (Pulpejos y uñas)", "Frote rotacional de yemas y uñas contra palma opuesta.")
         }
 
+        # Nombres de los 5 Momentos de Higiene de Manos (OMS)
+        self.moments_titles = [
+            "Antes del contacto con el paciente",
+            "Antes de realizar una tarea aséptica",
+            "Después de exposición a fluidos corporales",
+            "Después del contacto con el paciente",
+            "Después del contacto con el entorno del paciente"
+        ]
+
         # Variables de estado
         self.analyzer = None
         self.cap = None
@@ -91,6 +100,7 @@ class HandWashAppModern(ctk.CTk):
         self.grid_overlay_enabled = True
         self.voice_prompt_done = False
         self.last_step_announced = -1
+        self.is_listening_for_moment = False
 
         # Inicializar Asistente de Voz
         self.voice = VoiceAssistant()
@@ -109,6 +119,7 @@ class HandWashAppModern(ctk.CTk):
 
     def on_close(self):
         self.is_running = False
+        self.is_listening_for_moment = False
         if self.voice:
             self.voice.close()
         if self.cap and self.cap.isOpened():
@@ -432,10 +443,11 @@ class HandWashAppModern(ctk.CTk):
         self.lbl_latency.pack(side="right", padx=(0, 15))
 
     # =========================================================================
-    # 3. PANEL DERECHO DE TELEMETRÍA Y PROTOCOLO
+    # 3. PANEL DERECHO DE TELEMETRÍA Y PROTOCOLO (REESTRUCTURADO FIJO)
     # =========================================================================
     def _create_telemetry_section(self, parent):
-        self.telemetry_aside = ctk.CTkScrollableFrame(
+        # Contenedor FIJO no scrollable para mantener card_timers 100% inmóvil arriba
+        self.telemetry_aside = ctk.CTkFrame(
             parent,
             width=410,
             fg_color="transparent"
@@ -443,7 +455,7 @@ class HandWashAppModern(ctk.CTk):
         self.telemetry_aside.pack(side="right", fill="both", expand=False)
 
         # ---------------------------------------------------------------------
-        # Card 1: Matriz de Relojes Digitales & Telemetría
+        # Card 1: Matriz de Relojes Digitales & Telemetría (FIJA E INMÓVIL)
         # ---------------------------------------------------------------------
         card_timers = ctk.CTkFrame(
             self.telemetry_aside,
@@ -452,7 +464,7 @@ class HandWashAppModern(ctk.CTk):
             border_width=1,
             border_color=self.colors["border_dark"]
         )
-        card_timers.pack(fill="x", pady=(0, 10))
+        card_timers.pack(side="top", fill="x", pady=(0, 10))
 
         # Top Header Status
         status_header = ctk.CTkFrame(card_timers, fg_color="transparent")
@@ -540,7 +552,7 @@ class HandWashAppModern(ctk.CTk):
         self.lbl_val_grade.pack(pady=(0, 4))
 
         # ---------------------------------------------------------------------
-        # Card 2: 5 Momentos de Higiene de Manos (OMS)
+        # Card 2: 5 Momentos de Higiene de Manos (OMS) CON SCROLLBAR INDEPENDIENTE
         # ---------------------------------------------------------------------
         card_moments = ctk.CTkFrame(
             self.telemetry_aside,
@@ -549,7 +561,7 @@ class HandWashAppModern(ctk.CTk):
             border_width=1,
             border_color=self.colors["border_dark"]
         )
-        card_moments.pack(fill="x", pady=(0, 10))
+        card_moments.pack(side="top", fill="x", pady=(0, 10))
 
         mom_head = ctk.CTkFrame(card_moments, fg_color="transparent")
         mom_head.pack(fill="x", padx=12, pady=(10, 6))
@@ -570,6 +582,14 @@ class HandWashAppModern(ctk.CTk):
         )
         self.lbl_mom_count.pack(side="right")
 
+        # CTkScrollableFrame INDEPENDIENTE para las 5 casillas de verificación
+        moments_scroll = ctk.CTkScrollableFrame(
+            card_moments,
+            height=150,
+            fg_color="transparent"
+        )
+        moments_scroll.pack(fill="x", padx=4, pady=(0, 8))
+
         moments_data = [
             ("1. Antes del contacto con el paciente", "Protección directa de bioseguridad"),
             ("2. Antes de realizar una tarea aséptica", "Catéteres, inyecciones, curaciones"),
@@ -583,8 +603,8 @@ class HandWashAppModern(ctk.CTk):
             var = ctk.BooleanVar(value=False)
             self.moment_vars.append(var)
 
-            chk_box = ctk.CTkFrame(card_moments, fg_color=self.colors["card_dark"], corner_radius=8)
-            chk_box.pack(fill="x", padx=12, pady=3)
+            chk_box = ctk.CTkFrame(moments_scroll, fg_color=self.colors["card_dark"], corner_radius=8)
+            chk_box.pack(fill="x", padx=8, pady=3)
 
             chk = ctk.CTkCheckBox(
                 chk_box,
@@ -595,7 +615,7 @@ class HandWashAppModern(ctk.CTk):
                 checkmark_color=self.colors["text_white"],
                 fg_color=self.colors["cyan_dark"],
                 hover_color=self.colors["cyan_primary"],
-                command=self.update_moments_count
+                command=lambda idx=i: self.on_moment_checkbox_clicked(idx)
             )
             chk.pack(anchor="w", padx=10, pady=(6, 2))
 
@@ -603,7 +623,7 @@ class HandWashAppModern(ctk.CTk):
             sub_lbl.pack(anchor="w", padx=(34, 10), pady=(0, 6))
 
         # ---------------------------------------------------------------------
-        # Card 3: Progreso del Protocolo OMS (Stepper de Pasos OMS)
+        # Card 3: Progreso del Protocolo OMS CON SCROLLBAR INDEPENDIENTE
         # ---------------------------------------------------------------------
         card_stepper = ctk.CTkFrame(
             self.telemetry_aside,
@@ -612,7 +632,7 @@ class HandWashAppModern(ctk.CTk):
             border_width=1,
             border_color=self.colors["border_dark"]
         )
-        card_stepper.pack(fill="x", pady=(0, 10))
+        card_stepper.pack(side="top", fill="both", expand=True, pady=(0, 5))
 
         step_head = ctk.CTkFrame(card_stepper, fg_color="transparent")
         step_head.pack(fill="x", padx=12, pady=(10, 6))
@@ -633,13 +653,21 @@ class HandWashAppModern(ctk.CTk):
         )
         self.lbl_step_tracker.pack(side="right")
 
+        # CTkScrollableFrame INDEPENDIENTE para los 6 pasos del protocolo OMS
+        stepper_scroll = ctk.CTkScrollableFrame(
+            card_stepper,
+            height=250,
+            fg_color="transparent"
+        )
+        stepper_scroll.pack(fill="both", expand=True, padx=4, pady=(0, 8))
+
         # Contenedor dinámico de widgets de pasos
         self.step_widgets = {}
         for idx in range(6):
             step_num, title, desc = self.steps_info[idx]
 
-            s_frame = ctk.CTkFrame(card_stepper, fg_color=self.colors["card_dark"], corner_radius=8, border_width=1, border_color=self.colors["card_dark"])
-            s_frame.pack(fill="x", padx=12, pady=3)
+            s_frame = ctk.CTkFrame(stepper_scroll, fg_color=self.colors["card_dark"], corner_radius=8, border_width=1, border_color=self.colors["card_dark"])
+            s_frame.pack(fill="x", padx=8, pady=3)
 
             top_row = ctk.CTkFrame(s_frame, fg_color="transparent")
             top_row.pack(fill="x", padx=8, pady=(6, 2))
@@ -723,7 +751,106 @@ class HandWashAppModern(ctk.CTk):
         online_lbl.pack(side="left")
 
     # =========================================================================
-    # 5. LÓGICA DE DETECCIÓN Y PROCESAMIENTO
+    # 5. LÓGICA DE FLUJO INTERACTIVO POR VOZ Y MANUAL
+    # =========================================================================
+    def on_moment_checkbox_clicked(self, index):
+        """Maneja el clic manual del usuario en cualquier casilla de los 5 Momentos OMS."""
+        if self.is_listening_for_moment:
+            self.is_listening_for_moment = False
+
+        self.update_moments_count()
+        if self.moment_vars[index].get():
+            title = self.moments_titles[index]
+            moment_num = index + 1
+            self.voice.speak(f"Momento {moment_num} seleccionado: {title}. Iniciando proceso.", force=True)
+            if not self.is_running:
+                self.after(600, self._start_video_detection_flow)
+
+    def start_voice_moment_selection(self):
+        """Inicia el proceso interactivo de pregunta por voz."""
+        self.lbl_status_badge.configure(
+            text="● SELECCIONE MOMENTO OMS (VOZ / MANUAL)",
+            text_color=self.colors["cyan_bright"]
+        )
+        self.is_listening_for_moment = True
+        self.voice.speak(
+            "Por favor, seleccione el momento de higiene del uno al cinco, o dígalo en voz alta.",
+            force=True
+        )
+        threading.Thread(target=self._voice_moment_listener_thread, daemon=True).start()
+
+    def _voice_moment_listener_thread(self):
+        """Hilo en segundo plano que escucha el comando de voz del usuario."""
+        time.sleep(2.5) # Espera breve para permitir que el mensaje TTS inicial termine
+        if not self.is_listening_for_moment or self.is_running:
+            return
+
+        text = self.voice.listen(timeout=6, phrase_time_limit=4)
+        if not self.is_listening_for_moment or self.is_running:
+            return
+
+        selected_num = self._parse_spoken_moment(text)
+        if selected_num is not None and 1 <= selected_num <= 5:
+            self.after(0, lambda: self._on_voice_moment_recognized(selected_num))
+        else:
+            if self.is_listening_for_moment and not self.is_running:
+                self.after(0, lambda: self.voice.speak(
+                    "No se detectó comando de voz claro. Puede seleccionar la casilla del uno al cinco manualmente en la pantalla."
+                ))
+
+    def _parse_spoken_moment(self, text):
+        """Analiza el texto reconocido por el micrófono y devuelve el número de momento 1..5."""
+        if not text or text in ["no_speech", "unknown", "error_import", "error_service", "error_mic"]:
+            return None
+        text_lower = text.lower()
+        mapping = {
+            1: ["uno", "un", "primero", "primera", "1", "momento uno", "momento 1"],
+            2: ["dos", "segundo", "segunda", "2", "momento dos", "momento 2"],
+            3: ["tres", "tercero", "tercera", "3", "momento tres", "momento 3"],
+            4: ["cuatro", "cuarto", "cuarta", "4", "momento cuatro", "momento 4"],
+            5: ["cinco", "quinto", "quinta", "5", "momento cinco", "momento 5"]
+        }
+        for num, patterns in mapping.items():
+            for pat in patterns:
+                if pat in text_lower:
+                    return num
+        return None
+
+    def _on_voice_moment_recognized(self, moment_num):
+        """Callback invocado cuando el hilo de voz reconoce con éxito el número de momento."""
+        if self.is_running:
+            return
+        self.is_listening_for_moment = False
+        index = moment_num - 1
+        self.moment_vars[index].set(True)
+        self.update_moments_count()
+        title = self.moments_titles[index]
+        self.voice.speak(f"Momento {moment_num} detectado por voz: {title}. Iniciando proceso.", force=True)
+        self.after(600, self._start_video_detection_flow)
+
+    def _start_video_detection_flow(self):
+        """Inicializa la fuente de video, reset de temporizadores y el bucle de detección IA."""
+        if self.is_running:
+            return
+        self.is_listening_for_moment = False
+        self.cap = cv2.VideoCapture(self.video_source)
+        if not self.cap.isOpened():
+            messagebox.showerror("Error", "No se pudo abrir la fuente de video.")
+            self.lbl_status_badge.configure(text="● ERROR EN FUENTE DE VIDEO", text_color=self.colors["rose_danger"])
+            return
+
+        self.is_running = True
+        self.btn_start.configure(text="⏹ DETENER DETECCIÓN", fg_color=self.colors["rose_danger"])
+        self.lbl_status_badge.configure(text="● DETECCIÓN EN VIVO ACTIVA", text_color=self.colors["emerald_success"])
+        self.restart_process()
+
+        if self.mode == "Evaluación Oficial OMS":
+            self.voice.speak("Iniciando evaluación oficial de lavado de manos según protocolo OMS.")
+
+        self.update_video_loop()
+
+    # =========================================================================
+    # 6. LÓGICA DE DETECCIÓN Y PROCESAMIENTO
     # =========================================================================
     def load_analyzer(self, config_key):
         self.lbl_status_badge.configure(text="● CARGANDO MODELOS IA...", text_color=self.colors["amber_warn"])
@@ -845,8 +972,10 @@ class HandWashAppModern(ctk.CTk):
             w["time"].configure(text="0 / 10s", text_color=self.colors["text_muted"])
 
     def toggle_process(self):
+        """Acción del botón primario 'INICIAR DETECCIÓN' / 'DETENER DETECCIÓN'."""
         if self.is_running:
             self.is_running = False
+            self.is_listening_for_moment = False
             self.btn_start.configure(text="▶ INICIAR DETECCIÓN", fg_color=self.colors["cyan_dark"])
             self.lbl_status_badge.configure(text="● DETECCIÓN PAUSADA", text_color=self.colors["amber_warn"])
             self.voice.stop_current()
@@ -855,24 +984,17 @@ class HandWashAppModern(ctk.CTk):
                 messagebox.showwarning("Advertencia", "Los modelos de IA no están cargados.")
                 return
 
-            self.cap = cv2.VideoCapture(self.video_source)
-            if not self.cap.isOpened():
-                messagebox.showerror("Error", "No se pudo abrir la fuente de video.")
-                return
-
-            self.is_running = True
-            self.btn_start.configure(text="⏹ DETENER DETECCIÓN", fg_color=self.colors["rose_danger"])
-            self.lbl_status_badge.configure(text="● DETECCIÓN EN VIVO ACTIVA", text_color=self.colors["emerald_success"])
-            self.restart_process()
-
-            if self.mode == "Evaluación Oficial OMS":
-                self.voice.speak("Iniciando evaluación oficial de lavado de manos según protocolo OMS.", force=True)
-
-            # Iniciar loop de video en hilo secundario o recurrente
-            self.update_video_loop()
+            # Verificar si el usuario ya ha seleccionado algún momento de los 5
+            any_selected = any(v.get() for v in self.moment_vars)
+            if not any_selected:
+                # Iniciar flujo de pregunta por voz y manual
+                self.start_voice_moment_selection()
+            else:
+                # Iniciar directamente el flujo de detección
+                self._start_video_detection_flow()
 
     # =========================================================================
-    # 6. BUCLE DE PROCESAMIENTO DE VIDEO Y OVERLAYS HUD
+    # 7. BUCLE DE PROCESAMIENTO DE VIDEO Y OVERLAYS HUD
     # =========================================================================
     def update_video_loop(self):
         if not self.is_running:
@@ -972,7 +1094,7 @@ class HandWashAppModern(ctk.CTk):
                 w["time"].configure(text="0 / 10s", text_color=self.colors["text_muted"])
 
     # =========================================================================
-    # 7. RENDERIZADO HUD SOBRE CANVAS
+    # 8. RENDERIZADO HUD SOBRE CANVAS
     # =========================================================================
     def _draw_frame_to_canvas(self, frame_bgr, results):
         h, w, _ = frame_bgr.shape
