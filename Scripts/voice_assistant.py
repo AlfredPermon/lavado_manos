@@ -81,8 +81,10 @@ class VoiceAssistant:
             return "ERROR_IMPORT"
             
         try:
-            # Use default microphone
-            with self._open_microphone() as source:
+            mic = self._open_microphone()
+            if mic is None:
+                return "ERROR_MIC"
+            with mic as source:
                 if calibrate:
                     print("Adjusting for ambient noise (Calibration requested)...")
                     self.recognizer.dynamic_energy_threshold = True

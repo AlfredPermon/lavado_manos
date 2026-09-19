@@ -101,6 +101,8 @@ class HandWashAppModern(ctk.CTk):
         self.voice_prompt_done = False
         self.last_step_announced = -1
         self.is_listening_for_moment = False
+        self.time_limit_enabled = True
+        self.target_step_duration = 20 # 20 segundos por paso por defecto
 
         # Inicializar Asistente de Voz
         self.voice = VoiceAssistant()
@@ -226,7 +228,7 @@ class HandWashAppModern(ctk.CTk):
                 "v1 - Ligero Legacy"
             ],
             command=self.on_model_change,
-            width=230,
+            width=210,
             height=32,
             fg_color=self.colors["card_dark"],
             button_color=self.colors["border_dark"],
@@ -234,7 +236,43 @@ class HandWashAppModern(ctk.CTk):
             text_color=self.colors["text_white"],
             font=ctk.CTkFont(size=12)
         )
-        self.model_menu.pack(side="left")
+        self.model_menu.pack(side="left", padx=(0, 15))
+
+        # Selector de Modo de Tiempo (Limitado vs Libre)
+        time_mode_lbl = ctk.CTkLabel(center_box, text="Tiempo:", font=ctk.CTkFont(size=12, weight="bold"), text_color=self.colors["text_muted"])
+        time_mode_lbl.pack(side="left", padx=(0, 4))
+
+        self.time_mode_seg = ctk.CTkSegmentedButton(
+            center_box,
+            values=["⏱️ Limitado", "♾️ Libre"],
+            command=self.on_time_mode_change,
+            width=140,
+            height=32,
+            selected_color=self.colors["cyan_dark"],
+            selected_hover_color=self.colors["cyan_primary"],
+            font=ctk.CTkFont(size=11, weight="bold")
+        )
+        self.time_mode_seg.set("⏱️ Limitado")
+        self.time_mode_seg.pack(side="left", padx=(0, 15))
+
+        # Selector de Duración por Paso (10s a 30s, default 20s)
+        dur_lbl = ctk.CTkLabel(center_box, text="Paso:", font=ctk.CTkFont(size=12, weight="bold"), text_color=self.colors["text_muted"])
+        dur_lbl.pack(side="left", padx=(0, 4))
+
+        self.dur_menu = ctk.CTkOptionMenu(
+            center_box,
+            values=["10s", "15s", "20s", "25s", "30s"],
+            command=self.on_step_duration_change,
+            width=80,
+            height=32,
+            fg_color=self.colors["card_dark"],
+            button_color=self.colors["border_dark"],
+            button_hover_color=self.colors["cyan_dark"],
+            text_color=self.colors["text_white"],
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        self.dur_menu.set("20s")
+        self.dur_menu.pack(side="left")
 
         # Sección Derecha: Acciones Primarias y Control de Voz
         right_box = ctk.CTkFrame(self.header_frame, fg_color="transparent")
@@ -638,20 +676,49 @@ class HandWashAppModern(ctk.CTk):
         step_head.pack(fill="x", padx=12, pady=(10, 6))
 
         lbl_step_hdr = ctk.CTkLabel(
-            step_head, 
-            text="🔄 PROGRESO DEL PROTOCOLO OMS", 
-            font=ctk.CTkFont(family="Inter", size=12, weight="bold"), 
+            step_head,
+            text="🔄 PROTOCOLO OMS",
+            font=ctk.CTkFont(family="Inter", size=12, weight="bold"),
             text_color=self.colors["text_white"]
         )
         lbl_step_hdr.pack(side="left")
 
+        step_ctrl_box = ctk.CTkFrame(step_head, fg_color="transparent")
+        step_ctrl_box.pack(side="right")
+
+        self.btn_prev_step = ctk.CTkButton(
+            step_ctrl_box,
+            text="◀",
+            width=26, height=24,
+            corner_radius=6,
+            fg_color=self.colors["card_dark"],
+            hover_color=self.colors["border_dark"],
+            text_color=self.colors["cyan_bright"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.prev_step_manual
+        )
+        self.btn_prev_step.pack(side="left", padx=(0, 3))
+
+        self.btn_next_step = ctk.CTkButton(
+            step_ctrl_box,
+            text="▶",
+            width=26, height=24,
+            corner_radius=6,
+            fg_color=self.colors["card_dark"],
+            hover_color=self.colors["border_dark"],
+            text_color=self.colors["cyan_bright"],
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.next_step_manual
+        )
+        self.btn_next_step.pack(side="left", padx=(0, 6))
+
         self.lbl_step_tracker = ctk.CTkLabel(
-            step_head, 
-            text="Paso 1 de 6", 
-            font=ctk.CTkFont(family="JetBrains Mono", size=11, weight="bold"), 
+            step_ctrl_box,
+            text="Paso 1/6",
+            font=ctk.CTkFont(family="JetBrains Mono", size=11, weight="bold"),
             text_color=self.colors["cyan_bright"]
         )
-        self.lbl_step_tracker.pack(side="right")
+        self.lbl_step_tracker.pack(side="left")
 
         # CTkScrollableFrame INDEPENDIENTE para los 6 pasos del protocolo OMS
         stepper_scroll = ctk.CTkScrollableFrame(
@@ -689,7 +756,7 @@ class HandWashAppModern(ctk.CTk):
 
             time_badge = ctk.CTkLabel(
                 top_row,
-                text="0 / 10s",
+                text="0 / 20s",
                 font=ctk.CTkFont(family="JetBrains Mono", size=10),
                 text_color=self.colors["text_muted"]
             )
@@ -697,6 +764,11 @@ class HandWashAppModern(ctk.CTk):
 
             sub_desc = ctk.CTkLabel(s_frame, text=desc, font=ctk.CTkFont(size=10), text_color=self.colors["text_muted"])
             sub_desc.pack(anchor="w", padx=(38, 8), pady=(0, 6))
+
+            # Hacer la tarjeta interactiva para selección manual al hacer click
+            for w_elem in [s_frame, top_row, num_badge, t_lbl, time_badge, sub_desc]:
+                w_elem.configure(cursor="hand2")
+                w_elem.bind("<Button-1>", lambda e, i=idx: self.jump_to_step(i))
 
             self.step_widgets[idx] = {
                 "frame": s_frame,
@@ -893,6 +965,61 @@ class HandWashAppModern(ctk.CTk):
         self.mode = selection
         self.lbl_status_badge.configure(text=f"● MODO: {self.mode.upper()}", text_color=self.colors["cyan_bright"])
 
+    def on_time_mode_change(self, value):
+        if "Libre" in value:
+            self.time_limit_enabled = False
+            self.lbl_status_badge.configure(text="● MODO LIBRE SIN TIEMPO", text_color=self.colors["cyan_bright"])
+            self.voice.speak("Modo libre sin tiempo activado. Realice el lavado a su propio ritmo.", force=True)
+        else:
+            self.time_limit_enabled = True
+            dur = getattr(self, 'target_step_duration', 20)
+            self.lbl_status_badge.configure(text=f"● TIEMPO LIMITADO ({dur}s)", text_color=self.colors["emerald_success"])
+            self.voice.speak(f"Tiempo limitado activado: {dur} segundos por paso.", force=True)
+
+    def on_step_duration_change(self, value):
+        try:
+            dur = int(value.replace("s", "").strip())
+            self.target_step_duration = dur
+            self.lbl_step_timer.configure(text=f"00:00 / {dur}s")
+            self.voice.speak(f"Duración por paso ajustada a {dur} segundos.", force=True)
+        except Exception:
+            pass
+
+    def prev_step_manual(self):
+        cur = self.analyzer.current_step_idx if self.analyzer else 0
+        target = max(0, cur - 1)
+        self.jump_to_step(target)
+
+    def next_step_manual(self):
+        cur = self.analyzer.current_step_idx if self.analyzer else 0
+        target = min(5, cur + 1)
+        self.jump_to_step(target)
+
+    def jump_to_step(self, step_idx):
+        if not (0 <= step_idx < 6):
+            return
+        if self.analyzer:
+            self.analyzer.current_step_idx = step_idx
+            self.analyzer.frames_validated = 0
+            self.analyzer.yolo_peak_counter = 0
+            self.analyzer.yolo_in_peak = False
+            self.analyzer.bilateral_state = {
+                'active': False,
+                'side_a_frames': 0,
+                'side_b_frames': 0,
+                'current_side': None,
+                'last_switch_time': 0,
+                'overtime_frames': 0
+            }
+
+        self.current_eval_step = step_idx
+        self.step_timer_start = time.time()
+        self.posture_banner_text = None
+
+        step_num, step_name, _ = self.steps_info[step_idx]
+        self.voice.speak(f"Paso ajustado manualmente a {step_num}: {step_name}.", force=True)
+        self.lbl_step_tracker.configure(text=f"Paso {step_idx + 1} de 6 (Manual)")
+
     def toggle_mute(self):
         if self.voice.muted:
             self.voice.set_mute(False)
@@ -954,22 +1081,43 @@ class HandWashAppModern(ctk.CTk):
 
         self.session_start_time = time.time()
         self.step_timer_start = time.time()
-        self.step_durations = {}
-        self.total_score = 100
+        self.current_eval_step = 0
         self.last_step_announced = -1
+        self.posture_warned_steps = set()
+        self.report_shown = False
+        self.posture_banner_text = None
 
+        self.step_eval_records = {}
+        for i in range(6):
+            step_num, step_name, _ = self.steps_info[i]
+            self.step_eval_records[i] = {
+                "step_num": step_num,
+                "step_name": step_name,
+                "status": "Pendiente",
+                "score": 0,
+                "time_spent": 0.0,
+                "progress_pct": 0,
+                "timeout": False
+            }
+
+        self.total_score = 0
+        target_dur = getattr(self, 'target_step_duration', 20)
+        time_limit_on = getattr(self, 'time_limit_enabled', True)
         self.lbl_total_timer.configure(text="00:00:00")
-        self.lbl_step_timer.configure(text="00:00 / 10s")
+        self.lbl_step_timer.configure(text=f"00:00 / {target_dur}s" if time_limit_on else "00:00 / Modo Libre")
         self.step_progress_bar.set(0)
-        self.lbl_val_score.configure(text="100/100")
+        self.lbl_val_score.configure(text="--/100")
 
         self._reset_stepper_ui()
 
     def _reset_stepper_ui(self):
+        target_dur = getattr(self, 'target_step_duration', 20)
+        time_limit_on = getattr(self, 'time_limit_enabled', True)
+        t_str = f"0 / {target_dur}s" if time_limit_on else "Modo Libre"
         for idx, w in self.step_widgets.items():
             w["frame"].configure(fg_color=self.colors["card_dark"], border_color=self.colors["card_dark"])
             w["num"].configure(fg_color=self.colors["border_dark"], text="✓" if idx == -1 else str(idx + 1))
-            w["time"].configure(text="0 / 10s", text_color=self.colors["text_muted"])
+            w["time"].configure(text=t_str, text_color=self.colors["text_muted"])
 
     def toggle_process(self):
         """Acción del botón primario 'INICIAR DETECCIÓN' / 'DETENER DETECCIÓN'."""
@@ -992,6 +1140,24 @@ class HandWashAppModern(ctk.CTk):
             else:
                 # Iniciar directamente el flujo de detección
                 self._start_video_detection_flow()
+
+    def _start_video_detection_flow(self):
+        if not hasattr(self, 'step_eval_records') or not self.step_eval_records:
+            self.restart_process()
+        else:
+            self.session_start_time = time.time()
+            self.step_timer_start = time.time()
+            self.report_shown = False
+
+        self.cap = cv2.VideoCapture(self.video_source)
+        if not self.cap.isOpened():
+            messagebox.showerror("Error de Cámara", "No se pudo acceder a la fuente de video.")
+            return
+
+        self.is_running = True
+        self.btn_start.configure(text="⏸ PAUSAR DETECCIÓN", fg_color=self.colors["rose_danger"])
+        self.lbl_status_badge.configure(text="● EVALUACIÓN OMS EN VIVO", text_color=self.colors["cyan_bright"])
+        self.update_video_loop()
 
     # =========================================================================
     # 7. BUCLE DE PROCESAMIENTO DE VIDEO Y OVERLAYS HUD
@@ -1051,47 +1217,128 @@ class HandWashAppModern(ctk.CTk):
         confidence = results.get("confidence", 0.0)
         wash_complete = results.get("wash_complete", False)
 
-        # Actualizar Reloj Total
+        target_dur = getattr(self, 'target_step_duration', 20)
+        time_limit_on = getattr(self, 'time_limit_enabled', True)
+        step_time_limit = target_dur + 2.0  # 2s tolerancia
+
+        # 1. Actualizar Reloj Total de la Sesión
         if self.session_start_time > 0:
             elapsed = int(time.time() - self.session_start_time)
             mins, secs = divmod(elapsed, 60)
             hrs, mins = divmod(mins, 60)
             self.lbl_total_timer.configure(text=f"{hrs:02d}:{mins:02d}:{secs:02d}")
 
-        # Actualizar paso actual
-        secs_step = int(progress * 10)
-        self.lbl_step_timer.configure(text=f"00:{secs_step:02d} / 10s")
+        # 2. Control de cambio natural de paso (Paso completado por el usuario)
+        if current_step != self.current_eval_step and self.current_eval_step < 6:
+            prev_st = self.current_eval_step
+            elapsed_step = time.time() - self.step_timer_start
+            self.step_eval_records[prev_st]["status"] = "Completado"
+            self.step_eval_records[prev_st]["score"] = 100
+            self.step_eval_records[prev_st]["time_spent"] = round(elapsed_step, 1)
+            self.step_eval_records[prev_st]["progress_pct"] = 100
+            self.step_eval_records[prev_st]["timeout"] = False
+
+            self.current_eval_step = current_step
+            self.step_timer_start = time.time()
+            self.posture_banner_text = None
+
+        # 3. Temporizador del Paso Actual (Con soporte para Tiempo Limitado vs Modo Libre)
+        elapsed_step = time.time() - self.step_timer_start
+        secs_step = int(elapsed_step)
+
+        if time_limit_on:
+            disp_sec = min(int(step_time_limit), secs_step)
+            self.lbl_step_timer.configure(text=f"00:{disp_sec:02d} / {target_dur}s")
+        else:
+            self.lbl_step_timer.configure(text=f"00:{secs_step:02d} / Modo Libre")
+
         self.step_progress_bar.set(progress)
         self.lbl_step_percent.configure(text=f"{int(progress * 100)}%")
 
-        # Actualizar Métricas
+        # 4. Diálogo de Postura Preventivo (A la mitad de la duración si el progreso < 30%)
+        warn_trigger_time = target_dur * 0.4
+        if elapsed_step >= warn_trigger_time and progress < 0.30 and self.current_eval_step not in self.posture_warned_steps and not wash_complete:
+            self.posture_warned_steps.add(self.current_eval_step)
+            step_num, step_name, _ = self.steps_info.get(self.current_eval_step, ("", "", ""))
+            warn_msg = f"Ajuste su postura de fricción de acuerdo a la imagen de apoyo de {step_name}."
+            self.voice.speak(warn_msg, force=True)
+            self.posture_banner_text = f"⚠️ AJUSTE SU POSTURA DE FRICCIÓN SEGÚN LA GUÍA OMS DE {step_num.upper()}"
+
+        # 5. Timer de Expiración y Avance Automático (Solo si time_limit_on es True)
+        if time_limit_on and elapsed_step >= step_time_limit and not wash_complete and self.current_eval_step < 6:
+            st_idx = self.current_eval_step
+            step_num, step_name, _ = self.steps_info.get(st_idx, ("", "", ""))
+            earned_score = int(progress * 100)
+
+            self.step_eval_records[st_idx]["status"] = "Tiempo Agotado (Incompleto)"
+            self.step_eval_records[st_idx]["score"] = earned_score
+            self.step_eval_records[st_idx]["time_spent"] = round(step_time_limit, 1)
+            self.step_eval_records[st_idx]["progress_pct"] = earned_score
+            self.step_eval_records[st_idx]["timeout"] = True
+
+            if st_idx < 5:
+                next_num, next_name, _ = self.steps_info.get(st_idx + 1, ("", "", ""))
+                msg = f"Se agotó el tiempo para el paso {st_idx + 1}. Por favor continúe con el siguiente paso: {next_name}."
+                self.voice.speak(msg, force=True)
+                self.analyzer.force_advance_step()
+                self.current_eval_step = self.analyzer.current_step_idx
+                self.step_timer_start = time.time()
+                self.posture_banner_text = None
+            else:
+                self.analyzer.wash_complete = True
+                wash_complete = True
+
+        # 6. Finalización de la Evaluación Completa de los 6 Pasos
+        if wash_complete and not getattr(self, 'report_shown', False):
+            self.report_shown = True
+            total_pts = sum(rec["score"] for rec in self.step_eval_records.values())
+            avg_score = int(total_pts / 6.0)
+            self.total_score = avg_score
+
+            if avg_score >= 90: grade = "A+ Excelente"
+            elif avg_score >= 75: grade = "B Satisfactorio"
+            elif avg_score >= 60: grade = "C En Proceso"
+            else: grade = "D Requiere Práctica"
+
+            self.lbl_val_score.configure(
+                text=f"{avg_score}/100",
+                text_color=self.colors["emerald_success"] if avg_score >= 75 else self.colors["amber_warn"]
+            )
+            self.lbl_val_grade.configure(text=grade, text_color=self.colors["cyan_bright"])
+            self.lbl_step_tracker.configure(text="¡EVALUACIÓN FINALIZADA!")
+
+            self.voice.speak(
+                f"Evaluación de lavado de manos finalizada. Calificación total: {avg_score} sobre 100. Dictamen: {grade}.",
+                force=True
+            )
+            self.after(600, self._show_final_evaluation_report)
+
+        # 7. Actualizar Stepper UI (Estados y Tiempos)
         conf_pct = confidence * 100
         self.lbl_val_conf.configure(text=f"{conf_pct:.1f}%")
 
-        if wash_complete:
-            self.lbl_val_score.configure(text="100/100", text_color=self.colors["emerald_success"])
-            self.lbl_val_grade.configure(text="A+ Óptimo", text_color="#c084fc")
-            self.lbl_step_tracker.configure(text="¡COMPLETADO!")
-        else:
-            self.lbl_step_tracker.configure(text=f"Paso {current_step + 1} de 6")
-
-        # Actualizar Stepper UI
         for idx, w in self.step_widgets.items():
-            if idx < current_step:
-                # Paso completado
-                w["frame"].configure(fg_color="#064e3b", border_color=self.colors["emerald_success"])
-                w["num"].configure(fg_color=self.colors["emerald_success"], text="✓")
-                w["time"].configure(text="10s ✓", text_color=self.colors["emerald_success"])
+            rec = self.step_eval_records.get(idx, {})
+            st_status = rec.get("status", "Pendiente")
+            if idx < current_step or (wash_complete and idx <= 5):
+                if st_status == "Completado":
+                    w["frame"].configure(fg_color="#064e3b", border_color=self.colors["emerald_success"])
+                    w["num"].configure(fg_color=self.colors["emerald_success"], text="✓")
+                    w["time"].configure(text=f"{rec.get('time_spent', target_dur)}s ✓", text_color=self.colors["emerald_success"])
+                else:
+                    w["frame"].configure(fg_color="#451a03", border_color=self.colors["amber_warn"])
+                    w["num"].configure(fg_color=self.colors["amber_warn"], text="⏱️")
+                    w["time"].configure(text=f"{rec.get('time_spent', target_dur)}s ⏱️", text_color=self.colors["amber_warn"])
             elif idx == current_step:
-                # Paso activo
                 w["frame"].configure(fg_color="#083344", border_color=self.colors["cyan_bright"])
                 w["num"].configure(fg_color=self.colors["cyan_bright"], text_color=self.colors["bg_dark"], text=str(idx + 1))
-                w["time"].configure(text=f"{secs_step} / 10s", text_color=self.colors["cyan_bright"])
+                t_str = f"{secs_step} / {target_dur}s" if time_limit_on else f"{secs_step}s (Libre)"
+                w["time"].configure(text=t_str, text_color=self.colors["cyan_bright"])
             else:
-                # Paso pendiente
                 w["frame"].configure(fg_color=self.colors["card_dark"], border_color=self.colors["card_dark"])
                 w["num"].configure(fg_color=self.colors["border_dark"], text_color=self.colors["text_white"], text=str(idx + 1))
-                w["time"].configure(text="0 / 10s", text_color=self.colors["text_muted"])
+                t_str = f"0 / {target_dur}s" if time_limit_on else "Modo Libre"
+                w["time"].configure(text=t_str, text_color=self.colors["text_muted"])
 
     # =========================================================================
     # 8. RENDERIZADO HUD SOBRE CANVAS
@@ -1143,6 +1390,12 @@ class HandWashAppModern(ctk.CTk):
             cv2.rectangle(frame_bgr, (15, h - 45), (310, h - 15), (15, 15, 15), -1)
             cv2.putText(frame_bgr, "Movimiento Bi-lateral: 2.2 Hz (Optimo)", (25, h - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (238, 211, 34), 1, cv2.LINE_AA)
 
+            # Banner de Advertencia Preventiva de Postura (si está activo)
+            if hasattr(self, 'posture_banner_text') and self.posture_banner_text:
+                cv2.rectangle(frame_bgr, (15, h - 90), (w - 15, h - 55), (15, 30, 80), -1)
+                cv2.rectangle(frame_bgr, (15, h - 90), (w - 15, h - 55), (0, 165, 255), 2)
+                cv2.putText(frame_bgr, self.posture_banner_text, (25, h - 68), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 255, 255), 1, cv2.LINE_AA)
+
             # PIP OMS Guía Ilustrada (Superior Derecha)
             cv2.rectangle(frame_bgr, (w - 210, 15), (w - 15, 115), (15, 15, 15), -1)
             cv2.rectangle(frame_bgr, (w - 210, 15), (w - 15, 115), (100, 100, 100), 1)
@@ -1150,7 +1403,7 @@ class HandWashAppModern(ctk.CTk):
             cv2.putText(frame_bgr, f"{step_num} / 6", (w - 60, 32), cv2.FONT_HERSHEY_SIMPLEX, 0.38, (180, 180, 180), 1, cv2.LINE_AA)
             cv2.putText(frame_bgr, step_name[:24], (w - 200, 58), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1, cv2.LINE_AA)
             cv2.putText(frame_bgr, "Friccion sostenida", (w - 200, 78), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (180, 180, 180), 1, cv2.LINE_AA)
-            cv2.putText(frame_bgr, "10 segundos", (w - 200, 96), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (129, 235, 16), 1, cv2.LINE_AA)
+            cv2.putText(frame_bgr, "10s + 2s tol.", (w - 200, 96), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (129, 235, 16), 1, cv2.LINE_AA)
 
         # Convertir a Formato PIL/Tkinter y Renderear en Canvas
         frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
@@ -1160,6 +1413,126 @@ class HandWashAppModern(ctk.CTk):
         self.canvas_video.delete("all")
         self.canvas_video.create_image(0, 0, anchor=tk.NW, image=img_tk)
         self.canvas_video.image_ref = img_tk
+
+    def _show_final_evaluation_report(self):
+        """Muestra ventana modal interactiva con el Reporte Detallado de Evaluación OMS."""
+        report_win = ctk.CTkToplevel(self)
+        report_win.title("Reporte Detallado de Evaluación de Lavado de Manos (OMS)")
+        report_win.geometry("920x750")
+        report_win.minsize(820, 620)
+        report_win.configure(fg_color=self.colors["bg_dark"])
+        report_win.grab_set()
+
+        # Header Frame
+        hdr = ctk.CTkFrame(report_win, fg_color=self.colors["panel_dark"], corner_radius=12, border_width=1, border_color=self.colors["border_dark"])
+        hdr.pack(fill="x", padx=20, pady=(20, 10))
+
+        total_pts = sum(rec["score"] for rec in self.step_eval_records.values())
+        avg_score = int(total_pts / 6.0)
+
+        if avg_score >= 90:
+            grade_str, grade_clr = "A+ Excelente - Aprobado", self.colors["emerald_success"]
+        elif avg_score >= 75:
+            grade_str, grade_clr = "B Satisfactorio - Aprobado", self.colors["cyan_bright"]
+        elif avg_score >= 60:
+            grade_str, grade_clr = "C En Proceso - Aprobado con Observaciones", self.colors["amber_warn"]
+        else:
+            grade_str, grade_clr = "D Requiere Práctica - Reprobado", self.colors["rose_danger"]
+
+        badge_frame = ctk.CTkFrame(hdr, fg_color="#0f172a", corner_radius=10)
+        badge_frame.pack(side="left", padx=20, pady=15)
+
+        score_lbl = ctk.CTkLabel(badge_frame, text=f"{avg_score}", font=ctk.CTkFont(family="Inter", size=48, weight="bold"), text_color=grade_clr)
+        score_lbl.pack(padx=20, pady=(10, 0))
+        pts_lbl = ctk.CTkLabel(badge_frame, text="/ 100 PUNTOS", font=ctk.CTkFont(family="JetBrains Mono", size=11, weight="bold"), text_color=self.colors["text_muted"])
+        pts_lbl.pack(padx=20, pady=(0, 10))
+
+        meta_frame = ctk.CTkFrame(hdr, fg_color="transparent")
+        meta_frame.pack(side="left", fill="both", expand=True, padx=15, pady=15)
+
+        title_lbl = ctk.CTkLabel(meta_frame, text="RESULTADO GENERAL DE EVALUACIÓN OMS", font=ctk.CTkFont(family="Inter", size=16, weight="bold"), text_color=self.colors["text_white"])
+        title_lbl.pack(anchor="w")
+
+        grade_lbl = ctk.CTkLabel(meta_frame, text=f"Dictamen: {grade_str}", font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color=grade_clr)
+        grade_lbl.pack(anchor="w", pady=(4, 0))
+
+        moms_selected = [self.moments_titles[i] for i, v in enumerate(self.moment_vars) if v.get()]
+        moms_str = ", ".join(moms_selected) if moms_selected else "Práctica Libre"
+        mom_lbl = ctk.CTkLabel(meta_frame, text=f"Momentos OMS Evaluados: {moms_str}", font=ctk.CTkFont(size=11), text_color=self.colors["text_muted"], wraplength=480)
+        mom_lbl.pack(anchor="w", pady=(4, 0))
+
+        # Scrollable Frame for Step Table
+        scroll_frame = ctk.CTkScrollableFrame(report_win, fg_color=self.colors["panel_dark"], corner_radius=12, border_width=1, border_color=self.colors["border_dark"])
+        scroll_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        tbl_hdr = ctk.CTkLabel(scroll_frame, text="DESGLOSE DETALLADO POR PASO (6 PASOS OMS)", font=ctk.CTkFont(family="Inter", size=13, weight="bold"), text_color=self.colors["cyan_bright"])
+        tbl_hdr.pack(anchor="w", padx=10, pady=(10, 5))
+
+        for st_idx in range(6):
+            rec = self.step_eval_records.get(st_idx, {})
+            step_num, step_name, step_desc = self.steps_info[st_idx]
+            status = rec.get("status", "Pendiente")
+            score = rec.get("score", 0)
+            time_spent = rec.get("time_spent", 0)
+            prog_pct = rec.get("progress_pct", 0)
+
+            is_ok = (status == "Completado")
+            card_bg = "#064e3b" if is_ok else "#451a03"
+            border_clr = self.colors["emerald_success"] if is_ok else self.colors["amber_warn"]
+
+            card = ctk.CTkFrame(scroll_frame, fg_color=card_bg, corner_radius=10, border_width=1, border_color=border_clr)
+            card.pack(fill="x", padx=10, pady=6)
+
+            # Left side
+            l_box = ctk.CTkFrame(card, fg_color="transparent")
+            l_box.pack(side="left", padx=12, pady=10, fill="both", expand=True)
+
+            num_lbl = ctk.CTkLabel(l_box, text=f"{step_num}: {step_name}", font=ctk.CTkFont(family="Inter", size=14, weight="bold"), text_color=self.colors["text_white"])
+            num_lbl.pack(anchor="w")
+
+            desc_lbl = ctk.CTkLabel(l_box, text=step_desc, font=ctk.CTkFont(size=11), text_color="#cbd5e1")
+            desc_lbl.pack(anchor="w")
+
+            # Right side metrics
+            r_box = ctk.CTkFrame(card, fg_color="transparent")
+            r_box.pack(side="right", padx=15, pady=10)
+
+            st_badge_txt = "✓ COMPLETADO (100%)" if is_ok else f"⏱️ INCOMPLETO ({prog_pct}%)"
+            st_badge_clr = self.colors["emerald_success"] if is_ok else self.colors["amber_warn"]
+
+            st_lbl = ctk.CTkLabel(r_box, text=st_badge_txt, font=ctk.CTkFont(family="JetBrains Mono", size=11, weight="bold"), text_color=st_badge_clr)
+            st_lbl.pack(anchor="e")
+
+            pt_lbl = ctk.CTkLabel(r_box, text=f"Puntaje: {score}/100 | Tiempo: {time_spent}s", font=ctk.CTkFont(size=11), text_color=self.colors["text_muted"])
+            pt_lbl.pack(anchor="e")
+
+        # Footer Actions
+        footer = ctk.CTkFrame(report_win, fg_color="transparent")
+        footer.pack(fill="x", padx=20, pady=(5, 20))
+
+        def export_json():
+            report_data = {
+                "timestamp": datetime.datetime.now().isoformat(),
+                "total_score": avg_score,
+                "dictamen": grade_str,
+                "moments_evaluated": moms_selected,
+                "steps": self.step_eval_records
+            }
+            out_dir = os.path.join(os.getcwd(), "Reportes_OMS")
+            os.makedirs(out_dir, exist_ok=True)
+            file_path = os.path.join(out_dir, f"reporte_lavado_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.json")
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(report_data, f, indent=4, ensure_ascii=False)
+            messagebox.showinfo("Reporte Exportado", f"Reporte guardado exitosamente en:\n{file_path}")
+
+        btn_export = ctk.CTkButton(footer, text="💾 Exportar Reporte JSON", fg_color=self.colors["cyan_dark"], hover_color=self.colors["cyan_primary"], command=export_json)
+        btn_export.pack(side="left", padx=5)
+
+        btn_restart = ctk.CTkButton(footer, text="↺ Nueva Evaluación", fg_color="#064e3b", hover_color=self.colors["emerald_success"], command=lambda: [report_win.destroy(), self.restart_process()])
+        btn_restart.pack(side="left", padx=5)
+
+        btn_close = ctk.CTkButton(footer, text="✖ Cerrar", fg_color=self.colors["card_dark"], text_color=self.colors["text_white"], command=report_win.destroy)
+        btn_close.pack(side="right", padx=5)
 
     def _show_canvas_placeholder(self, text):
         self.canvas_video.delete("all")

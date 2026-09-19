@@ -50,11 +50,15 @@ except ImportError:
     pass
 
 try:
-    if "keras.src.models.functional" not in sys.modules:
-        sys.modules["keras.src.models.functional"] = importlib.import_module(
-            "keras.src.engine.functional"
-        )
-except ImportError:
+    import keras.src.engine.functional as _ksef
+    sys.modules["keras.src.models.functional"] = _ksef
+except Exception:
+    pass
+
+try:
+    import keras.src.models.functional as _ksmf
+    sys.modules["keras.src.engine.functional"] = _ksmf
+except Exception:
     pass
 
 _original_inputlayer_from_config = tf.keras.layers.InputLayer.from_config
@@ -119,7 +123,7 @@ tf.keras.layers.MultiHeadAttention.from_config = _compat_mha_from_config
 keras.layers.MultiHeadAttention.from_config = _compat_mha_from_config
 
 try:
-    from keras.src.mixed_precision import policy as _keras_policy
+    _keras_policy = importlib.import_module("keras.src.mixed_precision.policy")
 
     _original_get_policy = _keras_policy.get_policy
 
@@ -142,23 +146,31 @@ except Exception:
 class ProjectHandDetector(HandDetector):
     def __init__(self, model_path, staticMode=False, maxHands=2,
                  modelComplexity=1, detectionCon=0.5, minTrackCon=0.5):
-        self.staticMode = staticMode
-        self.maxHands = maxHands
-        self.detectionCon = detectionCon
-        self.minTrackCon = minTrackCon
-        self.tipIds = [4, 8, 12, 16, 20]
+        # Initialize parent HandDetector so self.hands, self.mpHands,
+        # self.mpDraw, self.fingers, self.lmList are all available.
+        super().__init__(
+            staticMode=staticMode,
+            maxHands=maxHands,
+            modelComplexity=modelComplexity,
+            detectionCon=detectionCon,
+            minTrackCon=minTrackCon,
+        )
 
+        # Additionally, create the Task-API HandLandmarker for VIDEO mode
         with open(model_path, "rb") as model_file:
             model_bytes = model_file.read()
 
-        base_options = _cvhm.python.BaseOptions(model_asset_buffer=model_bytes)
-        options = _cvhm.vision.HandLandmarkerOptions(
+        from mediapipe.tasks import python as mp_python
+        from mediapipe.tasks.python import vision as mp_vision
+
+        base_options = mp_python.BaseOptions(model_asset_buffer=model_bytes)
+        options = mp_vision.HandLandmarkerOptions(
             base_options=base_options,
             num_hands=self.maxHands,
-            running_mode=_cvhm.vision.RunningMode.VIDEO
+            running_mode=mp_vision.RunningMode.VIDEO
         )
 
-        self.detector = _cvhm.vision.HandLandmarker.create_from_options(options)
+        self.task_detector = mp_vision.HandLandmarker.create_from_options(options)
         self.timestamp = 0
 
 # ============================================================
@@ -223,6 +235,60 @@ class ExpandDim(Layer):
     def get_config(self):
         config = super().get_config()
         config.update({"axis": self.axis})
+        return config
+
+
+class CategoricalFocalLoss(keras.losses.Loss):
+    def __init__(self, gamma=2.0, alpha=None, name="categorical_focal_loss", **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.gamma = float(gamma)
+        self.alpha = alpha
+
+    def call(self, y_true, y_pred):
+        y_pred = tf.clip_by_value(y_pred, 1e-7, 1.0 - 1e-7)
+        cross_entropy = -y_true * tf.math.log(y_pred)
+        weight = y_true * tf.pow(1.0 - y_pred, self.gamma)
+        loss = weight * cross_entropy
+        if self.alpha is not None:
+            loss = loss * self.alpha
+        return tf.reduce_sum(loss, axis=-1)
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"gamma": self.gamma, "alpha": self.alpha})
+        return config
+
+
+class TemporalAttentionReadout(Layer):
+    def __init__(self, units=64, **kwargs):
+        super().__init__(**kwargs)
+        self.units = units
+
+    def build(self, input_shape):
+        self.W = self.add_weight(
+            name="attn_W",
+            shape=(input_shape[-1], self.units),
+            initializer="glorot_uniform",
+            trainable=True
+        )
+        self.u = self.add_weight(
+            name="attn_u",
+            shape=(self.units, 1),
+            initializer="glorot_uniform",
+            trainable=True
+        )
+        super().build(input_shape)
+
+    def call(self, x):
+        v = tf.tanh(tf.tensordot(x, self.W, axes=1))
+        vu = tf.tensordot(v, self.u, axes=1)
+        alphas = tf.nn.softmax(vu, axis=1)
+        output = tf.reduce_sum(x * alphas, axis=1)
+        return output
+
+    def get_config(self):
+        config = super().get_config()
+        config.update({"units": self.units})
         return config
 
 # ============================================================
@@ -439,7 +505,7 @@ class HandWashAnalyzer:
         self.yolo_device = "cuda" if torch.cuda.is_available() else "cpu"
         
         # Validation thresholds
-        self.seq_len_req = 30
+        self.seq_len_req = 45
         self.yolo_peaks_req = 5
 
     def reset_state(self):
@@ -475,6 +541,24 @@ class HandWashAnalyzer:
             'last_switch_time': 0,
             'overtime_frames': 0
         }
+
+    def force_advance_step(self):
+        """Fuerza el avance al siguiente paso cuando se agota el temporizador (10s + 2s tolerancia)."""
+        self.current_step_idx += 1
+        self.frames_validated = 0
+        self.yolo_peak_counter = 0
+        self.yolo_in_peak = False
+        self.bilateral_state = {
+            'active': False,
+            'side_a_frames': 0,
+            'side_b_frames': 0,
+            'current_side': None,
+            'last_switch_time': 0,
+            'overtime_frames': 0
+        }
+        if self.current_step_idx > 5:
+            self.wash_complete = True
+            self.current_step_idx = 5
 
     def _resolve_hand_landmarker_task_path(self):
         candidates = [
@@ -565,6 +649,8 @@ class HandWashAnalyzer:
                 "SliceLast": SliceLast,
                 "TimeValidMask": TimeValidMask,
                 "ExpandDim": ExpandDim,
+                "CategoricalFocalLoss": CategoricalFocalLoss,
+                "TemporalAttentionReadout": TemporalAttentionReadout,
             }):
                 self.models_main = [_load_for_inference(p) for p in self.model_paths_main]
                 self.models_cvz = [_load_for_inference(p) for p in self.model_paths_cvz]
@@ -630,12 +716,17 @@ class HandWashAnalyzer:
                 cls_cvz[i] = mc
                 conf_cvz[i] = float(logits[mc])
 
-        # Global Consensus
+        # Global Consensus (Weighted)
         score_by_class = defaultdict(float)
-        for c, cf in zip(cls_main, conf_main):
-            if c >= 0 and cf > self.confidence_threshold: score_by_class[c] += cf
-        for c, cf in zip(cls_cvz, conf_cvz):
-            if c >= 0 and cf > self.confidence_threshold: score_by_class[c] += cf
+        main_weights = [1.2, 1.0] if len(cls_main) >= 2 else [1.0] * len(cls_main)
+        cvz_weights = [1.2, 1.0] if len(cls_cvz) >= 2 else [1.0] * len(cls_cvz)
+
+        for c, cf, w in zip(cls_main, conf_main, main_weights):
+            if c >= 0 and cf > self.confidence_threshold:
+                score_by_class[c] += cf * w
+        for c, cf, w in zip(cls_cvz, conf_cvz, cvz_weights):
+            if c >= 0 and cf > self.confidence_threshold:
+                score_by_class[c] += cf * w
             
         global_lstm_cls = -1
         global_lstm_conf = 0.0
@@ -804,8 +895,28 @@ class HandWashAnalyzer:
             else:
                 # Progress based on frames
                 if pred_step_idx == self.current_step_idx:
-                    self.frames_validated += 1
-                    status_color = (0, 255, 0)
+                    # Enforce strict motion & hand presence for Step 0 (Palma con Palma)
+                    valid_step = True
+                    if self.current_step_idx == 0:
+                        has_both_hands = False
+                        if len(self.sequence_main) > 0:
+                            last_frame = self.sequence_main[-1]
+                            has_both_hands = (last_frame[126] > 0.5 and last_frame[127] > 0.5)
+                        
+                        motion_std = 0.0
+                        if len(self.sequence_main) >= 15:
+                            seq_arr = np.array(self.sequence_main, dtype=np.float32)
+                            motion_std = float(np.mean(np.std(seq_arr[:, :126], axis=0)))
+                        
+                        has_friction_motion = (motion_std > 0.010)
+                        valid_step = has_both_hands and has_friction_motion
+                    
+                    if valid_step:
+                        self.frames_validated += 1
+                        status_color = (0, 255, 0)
+                    else:
+                        if self.frames_validated > 0: self.frames_validated -= 1
+                        status_color = (255, 165, 0) # Orange: waiting for active friction motion
                     
                     # Bilateral Logic Update
                     # Only for Steps 4, 6, 7, 8 (Indices 1, 3, 4, 5)
